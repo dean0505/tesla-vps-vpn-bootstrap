@@ -1,0 +1,12 @@
+config.env
+*.conf
+*.ovpn
+*.key
+*.crt
+*.csr
+*.pem
+*.p12
+*.zip
+vpn-clients/
+easy-rsa/
+.DS_Store
