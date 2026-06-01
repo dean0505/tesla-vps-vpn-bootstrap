@@ -37,11 +37,47 @@ Remove the matching `[Peer]` block from `/etc/wireguard/wg0.conf`, then run:
 sudo systemctl restart wg-quick@wg0
 ```
 
+Confirm the client public key is gone:
+
+```bash
+sudo wg show wg0 peers
+```
+
+If you created one profile per device, only the lost device needs to be removed.
+
 ## Revoking an OpenVPN Client
 
-This bootstrap keeps the setup simple and does not enable a CRL by default.
-For production multi-user use, add Easy-RSA certificate revocation and set
-`crl-verify` in the OpenVPN server config.
+The OpenVPN setup uses Easy-RSA certificates. To revoke a client, generate a
+certificate revocation list and make the server enforce it.
 
-For one-person emergency fallback use, rebuilding the OpenVPN profile and
-removing the old client file is often simpler.
+From the Easy-RSA directory:
+
+```bash
+cd /etc/openvpn/easy-rsa-fallback
+sudo ./easyrsa --batch revoke phone
+sudo ./easyrsa gen-crl
+sudo install -m 0644 pki/crl.pem /etc/openvpn/server/crl.pem
+```
+
+Then add this line to `/etc/openvpn/server/fallback.conf` if it is not already
+present:
+
+```text
+crl-verify crl.pem
+```
+
+Restart OpenVPN:
+
+```bash
+sudo systemctl restart openvpn-server@fallback
+```
+
+Verify the service is still healthy:
+
+```bash
+sudo systemctl status openvpn-server@fallback
+sudo journalctl -u openvpn-server@fallback -n 100 --no-pager
+```
+
+Replace `phone` with the `CLIENT_NAME` used when the profile was generated. Keep
+the CRL file readable by OpenVPN but do not commit it to Git.

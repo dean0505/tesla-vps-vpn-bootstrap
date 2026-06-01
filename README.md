@@ -56,6 +56,7 @@ Clone this repo on the VPS, review the config, then run:
 ```bash
 cp config.example.env config.env
 $EDITOR config.env
+./bootstrap.sh --dry-run --config config.env
 sudo ./bootstrap.sh --config config.env
 ```
 
@@ -78,6 +79,10 @@ The repository includes CI for shell syntax and accidental-secret checks. Full
 install validation should be run on a disposable Ubuntu VPS because the
 bootstrap modifies host networking, firewall, NAT, VPN services, and generated
 client keys.
+
+Use `--dry-run` before install to review package installs, firewall changes,
+sysctl changes, NAT rules, generated file paths, and systemd service actions
+without modifying the host.
 
 ## Example Config
 

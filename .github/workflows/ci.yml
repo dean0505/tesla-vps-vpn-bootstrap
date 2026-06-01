@@ -7,7 +7,7 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,3 +28,6 @@ jobs:
           test -n "$VPN_HOST"
           test -n "$WG_PORT"
           test -n "$OVPN_PORT"
+
+      - name: Check dry-run plan on Ubuntu 24.04
+        run: ./bootstrap.sh --dry-run --config config.example.env

@@ -2,14 +2,20 @@
 set -euo pipefail
 
 CONFIG_FILE="config.env"
+DRY_RUN=false
 
 usage() {
   cat <<'USAGE'
 Usage:
   sudo ./bootstrap.sh [--config config.env]
+  ./bootstrap.sh --dry-run [--config config.env]
 
 Creates WireGuard plus OpenVPN TCP fallback on Ubuntu.
 Generated client profiles are written to /root/vpn-clients.
+
+Options:
+  --config FILE  Load configuration from FILE. Defaults to config.env.
+  --dry-run      Print the planned host changes without modifying the system.
 USAGE
 }
 
@@ -18,6 +24,10 @@ while [[ $# -gt 0 ]]; do
     --config)
       CONFIG_FILE="${2:-}"
       shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
       ;;
     -h|--help)
       usage
@@ -30,11 +40,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-if [[ "${EUID}" -ne 0 ]]; then
-  echo "Run as root: sudo ./bootstrap.sh" >&2
-  exit 1
-fi
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   echo "Config file not found: ${CONFIG_FILE}" >&2
@@ -58,7 +63,11 @@ source "${CONFIG_FILE}"
 : "${PUBLIC_INTERFACE:=}"
 
 if [[ -z "${PUBLIC_INTERFACE}" ]]; then
-  PUBLIC_INTERFACE="$(ip route show default | awk '{print $5; exit}')"
+  if command -v ip >/dev/null 2>&1; then
+    PUBLIC_INTERFACE="$(ip route show default | awk '{print $5; exit}')"
+  elif [[ "${DRY_RUN}" == true ]]; then
+    PUBLIC_INTERFACE="<auto-detected-default-interface>"
+  fi
 fi
 
 if [[ -z "${PUBLIC_INTERFACE}" ]]; then
@@ -70,6 +79,49 @@ CLIENT_DIR="/root/vpn-clients"
 WG_DIR="/etc/wireguard"
 OVPN_DIR="/etc/openvpn/server"
 EASYRSA_DIR="/etc/openvpn/easy-rsa-fallback"
+
+print_dry_run() {
+  cat <<PLAN
+Dry run: no system changes will be made.
+
+Target:
+  VPN host: ${VPN_HOST}
+  Public interface: ${PUBLIC_INTERFACE}
+
+Packages that would be installed:
+  wireguard openvpn easy-rsa ufw iptables-persistent ca-certificates
+
+Forwarding/sysctl that would be configured:
+  /etc/sysctl.d/99-vpn-forwarding.conf
+  net.ipv4.ip_forward=1
+
+Firewall rules that would be applied:
+  ufw allow OpenSSH
+  ufw allow ${WG_PORT}/udp
+  ufw allow ${OVPN_PORT}/tcp
+  ufw route allow in on wg0 out on ${PUBLIC_INTERFACE}
+  ufw route allow in on tun0 out on ${PUBLIC_INTERFACE}
+  ufw --force enable
+
+NAT rules that would be ensured:
+  iptables -t nat -A POSTROUTING -s ${WG_SUBNET} -o ${PUBLIC_INTERFACE} -j MASQUERADE
+  iptables -t nat -A POSTROUTING -s ${OVPN_CIDR} -o ${PUBLIC_INTERFACE} -j MASQUERADE
+  netfilter-persistent save
+
+WireGuard files/services that would be created:
+  ${WG_DIR}/wg0.conf
+  ${CLIENT_DIR}/wireguard-${CLIENT_NAME}.conf
+  systemctl enable --now wg-quick@wg0
+
+OpenVPN files/services that would be created:
+  ${EASYRSA_DIR}
+  ${OVPN_DIR}/fallback.conf
+  ${CLIENT_DIR}/openvpn-${CLIENT_NAME}.ovpn
+  systemctl enable --now openvpn-server@fallback
+
+Generated client profiles would contain private keys and must not be committed.
+PLAN
+}
 
 install_packages() {
   export DEBIAN_FRONTEND=noninteractive
@@ -225,6 +277,16 @@ OVPNCONF
 }
 
 main() {
+  if [[ "${DRY_RUN}" == true ]]; then
+    print_dry_run
+    exit 0
+  fi
+
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "Run as root: sudo ./bootstrap.sh" >&2
+    exit 1
+  fi
+
   echo "Installing VPN gateway on ${PUBLIC_INTERFACE} for ${VPN_HOST}"
   install_packages
   enable_forwarding
